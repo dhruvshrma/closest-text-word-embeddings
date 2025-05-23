@@ -172,3 +172,14 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
+# Frontend
+frontend/node_modules/
+frontend/build/
+frontend/public/
+
+data/
+data/cache/
+
+.vscode/
+*.idea/
