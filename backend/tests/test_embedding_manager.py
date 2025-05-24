@@ -17,9 +17,9 @@ def manager():
 
 def test_get_single_embedding(manager: EmbeddingManager):
     word = "cat"
-    embedding = manager.get_embeddings(word, use_cache=True)
+    embedding = manager.get_embeddings([word], use_cache=True)
     assert isinstance(embedding, np.ndarray)
-    assert embedding.shape == (384,)
+    assert embedding.shape == (1,384)
 
 def test_get_multiple_embeddings(manager: EmbeddingManager):
     words = ["cat", "dog", "animal"]

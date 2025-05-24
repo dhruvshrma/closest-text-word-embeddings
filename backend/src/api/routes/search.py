@@ -21,19 +21,23 @@ from data.dataset import (
 
 router = APIRouter()
 
-# TODO: Refactor to use FastAPI's Depends for proper state management and testing.
-embedding_manager_instance = EmbeddingManager(
-    model_name="all-MiniLM-L6-v2", use_faiss_index=True
-)
+# Removed: embedding_manager_instance = EmbeddingManager(...)
 
 
 async def get_embedding_manager() -> EmbeddingManager:
-    if embedding_manager_instance is None:
-        raise HTTPException(status_code=503, detail="EmbeddingManager not initialized")
-    return embedding_manager_instance
+    """Placeholder for dependency injection. This should be overridden by the main app."""
+    # This function body will effectively be replaced by the one in main.py via dependency_overrides
+    # If not overridden, calls to this will fail, indicating a setup problem.
+    raise NotImplementedError(
+        "Search router's get_embedding_manager was not overridden by the main application. Check FastAPI startup and dependency overrides."
+    )
 
 
-@router.post("/load-corpus", response_model=LoadCorpusResponse)
+@router.post(
+    "/load-corpus",
+    response_model=LoadCorpusResponse,
+    summary="Load a dataset into the search engine",
+)
 async def load_corpus_route(
     request: LoadCorpusRequest, em: EmbeddingManager = Depends(get_embedding_manager)
 ):
@@ -43,7 +47,6 @@ async def load_corpus_route(
 
     try:
         if request.dataset_name == "nltk_common_words":
-            # Parameters from request or defaults
             top_k = request.max_words if request.max_words is not None else 10000
             min_len = (
                 request.min_word_length if request.min_word_length is not None else 3
@@ -54,10 +57,9 @@ async def load_corpus_route(
             min_len = (
                 request.min_word_length if request.min_word_length is not None else 3
             )
-            # stream_limit for ConceptNet can be added to LoadCorpusRequest if needed
             dataset = ConceptNetWordsDataset(
                 max_words=max_w, min_word_length=min_len, stream_limit=200000
-            )  # Default stream_limit
+            )
         else:
             raise HTTPException(
                 status_code=400, detail=f"Unknown dataset_name: {request.dataset_name}"
@@ -65,24 +67,21 @@ async def load_corpus_route(
 
         if dataset:
             print(f"Loading dataset: {request.dataset_name}")
-            dataset_words = dataset.load()  # This can take time
+            dataset_words = dataset.load()
             print(
                 f"Dataset {request.dataset_name} loaded with {len(dataset_words)} words."
             )
         else:
-            # Should have been caught by unknown dataset_name, but as a safeguard
             raise HTTPException(
                 status_code=500, detail="Dataset could not be initialized."
             )
 
         if not dataset_words:
-            # If dataset loaded but returned no words (e.g. NLTK fallback or ConceptNet empty)
             msg = f"Dataset '{request.dataset_name}' loaded but resulted in an empty word list."
             print(msg)
-            # Decide if this is an error or just a state to report
-            # For now, let load_corpus handle it, it might build an empty index or warn.
             raise HTTPException(status_code=404, detail=msg)
 
+        # Use the injected EmbeddingManager (em)
         em.load_corpus(texts=dataset_words, rebuild_index=request.rebuild_index)
 
         num_loaded = len(dataset_words)
@@ -103,7 +102,6 @@ async def load_corpus_route(
             detail=f"Dataset dependency missing for {request.dataset_name}: {e}",
         )
     except Exception as e:
-        # Log the exception e for debugging
         print(f"Error loading corpus {request.dataset_name}: {e}")
         raise HTTPException(
             status_code=500,
@@ -111,60 +109,89 @@ async def load_corpus_route(
         )
 
 
-@router.post("/search", response_model=SearchResponse)
+@router.post(
+    "/search",
+    response_model=SearchResponse,
+    summary="Search for similar texts using the loaded corpus",
+)
 async def search_route(
-    request: SearchQuery, em: EmbeddingManager = Depends(get_embedding_manager)
+    request: SearchQuery,
+    em: EmbeddingManager = Depends(
+        get_embedding_manager
+    ),  # Uses the overridden manager
 ):
     """Performs a nearest neighbor search for a single query text."""
-    if not em._faiss_actually_enabled or not em.faiss_engine:
-        raise HTTPException(
-            status_code=503, detail="FAISS search is not available or not initialized."
-        )
-    if em.corpus_texts is None or (
-        em.faiss_engine.index is None or em.faiss_engine.index.ntotal == 0
-    ):
+    # The injected 'em' is now the global manager from app.state
+    if not em.corpus_texts:
         raise HTTPException(
             status_code=404,
-            detail="Corpus not loaded or FAISS index empty. Please load a corpus first.",
+            detail="Corpus not loaded. Please load a corpus first via /load-corpus or ensure pre-built data loaded on startup.",
+        )
+
+    if (
+        not em._faiss_actually_enabled
+        or not em.faiss_engine
+        or not em.faiss_engine.index
+        or em.faiss_engine.index.ntotal == 0
+    ):
+        # Even if corpus_texts is loaded, FAISS might not be ready for search
+        raise HTTPException(
+            status_code=503,
+            detail="FAISS search is not available, not initialized, or index is empty. Ensure corpus is loaded and FAISS is enabled/working.",
         )
 
     results = em.search_corpus(query_texts=[request.text], k=request.k)
-    if results is None or not results[0]:
-        found_results = []  # No results found
-    else:
-        found_results = [SearchResultItem(**item) for item in results[0]]
+    # search_corpus now returns List[List[Dict]] so results[0] is the list of dicts for the single query
+    found_results = (
+        [SearchResultItem(**item) for item in results[0]]
+        if results and results[0]
+        else []
+    )
 
     return SearchResponse(query_text=request.text, results=found_results)
 
 
-@router.post("/batch-search", response_model=BatchSearchResponse)
+@router.post(
+    "/batch-search",
+    response_model=BatchSearchResponse,
+    summary="Batch search for similar texts",
+)
 async def batch_search_route(
-    request: BatchSearchQuery, em: EmbeddingManager = Depends(get_embedding_manager)
+    request: BatchSearchQuery,
+    em: EmbeddingManager = Depends(
+        get_embedding_manager
+    ),  # Uses the overridden manager
 ):
     """Performs a nearest neighbor search for a batch of query texts."""
-    if not em._faiss_actually_enabled or not em.faiss_engine:
-        raise HTTPException(
-            status_code=503, detail="FAISS search is not available or not initialized."
-        )
-    if em.corpus_texts is None or (
-        em.faiss_engine.index is None or em.faiss_engine.index.ntotal == 0
-    ):
+    if not em.corpus_texts:
         raise HTTPException(
             status_code=404,
-            detail="Corpus not loaded or FAISS index empty. Please load a corpus first.",
+            detail="Corpus not loaded. Please load a corpus first via /load-corpus or ensure pre-built data loaded on startup.",
+        )
+
+    if (
+        not em._faiss_actually_enabled
+        or not em.faiss_engine
+        or not em.faiss_engine.index
+        or em.faiss_engine.index.ntotal == 0
+    ):
+        raise HTTPException(
+            status_code=503,
+            detail="FAISS search is not available, not initialized, or index is empty. Ensure corpus is loaded and FAISS is enabled/working.",
         )
 
     search_results_raw = em.search_corpus(query_texts=request.texts, k=request.k)
 
-    if search_results_raw is None:
-        # This case implies an issue with search_corpus itself (e.g., FAISS disabled mid-way, though unlikely with checks)
-        raise HTTPException(
-            status_code=500, detail="Batch search failed to produce results."
-        )
-
     response_items = []
     for i, query_text in enumerate(request.texts):
-        matches = [SearchResultItem(**item) for item in search_results_raw[i]]
+        # search_results_raw[i] contains the list of dicts for the i-th query text
+        matches = (
+            [SearchResultItem(**item) for item in search_results_raw[i]]
+            if search_results_raw
+            and len(search_results_raw) > i
+            and search_results_raw[i]
+            else []
+        )
         response_items.append(
             BatchSearchResultItem(query_text=query_text, matches=matches)
         )

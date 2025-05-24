@@ -1,7 +1,6 @@
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from typing import List
-import os  # Keep os for path joining for cache_dir
 from loguru import logger
 
 
@@ -69,7 +68,6 @@ async def list_models_api(manager: EmbeddingManager = Depends(get_embedding_mana
 
         response_models = []
         for model_data in available_models:
-            # Ensure embedding_dim is an int, though EmbeddingManager init should guarantee this.
             embedding_dim = manager.embedding_dim
             assert (
                 embedding_dim is not None
