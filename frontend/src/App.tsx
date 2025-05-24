@@ -1,5 +1,5 @@
 import React from 'react';
-import './App.css'; // You might want to create this file for basic styles
+import './App.css'; 
 import WordEmbeddingInterface from './components/WordEmbeddingInterface';
 function App() {
   return (
