@@ -17,9 +17,8 @@ def manager():
 
 def test_get_single_embedding(manager: EmbeddingManager):
     word = "cat"
-    embedding = manager.get_embedding(word)
+    embedding = manager.get_embeddings(word, use_cache=True)
     assert isinstance(embedding, np.ndarray)
-    # Default model all-MiniLM-L6-v2 has 384 dimensions
     assert embedding.shape == (384,)
 
 def test_get_multiple_embeddings(manager: EmbeddingManager):
